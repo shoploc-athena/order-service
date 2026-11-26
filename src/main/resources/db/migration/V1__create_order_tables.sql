@@ -1,7 +1,7 @@
 -- V1__create_order_tables.sql
 -- Creates initial order-service schema: cart, order checkout, orders, and history
 -- All amounts in cents (BIGINT), timestamps in UTC (TIMESTAMPTZ)
--- Foreign keys to other services (customer_id, store_id, article_id, actor_id) are UUIDs only
+-- Foreign keys to other services (customer_id, store_id, article_id, actor_id) are UUIDs as VARCHAR(36)
 -- No cascade delete on orders to prevent accidental data loss
 
 -- =====================================================
@@ -9,8 +9,8 @@
 -- Purpose: Shopping cart per customer (one per customer)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS cart (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id UUID NOT NULL UNIQUE,
+    id VARCHAR(36) PRIMARY KEY,
+    customer_id VARCHAR(36) NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -23,10 +23,10 @@ CREATE INDEX IF NOT EXISTS idx_cart_customer_id ON cart(customer_id);
 -- Relationship: cart -> cart_item (1:N, cascade delete)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS cart_item (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    cart_id UUID NOT NULL REFERENCES cart(id) ON DELETE CASCADE,
-    store_id UUID NOT NULL,
-    article_id UUID NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    cart_id VARCHAR(36) NOT NULL REFERENCES cart(id) ON DELETE CASCADE,
+    store_id VARCHAR(36) NOT NULL,
+    article_id VARCHAR(36) NOT NULL,
     quantity INTEGER NOT NULL CHECK (quantity > 0),
     added_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_cart_item_cart_article UNIQUE (cart_id, article_id)
@@ -41,17 +41,16 @@ CREATE INDEX IF NOT EXISTS idx_cart_item_store_id ON cart_item(store_id);
 -- Idempotency: (customer_id, idempotency_key) must be unique OR both NULL
 -- =====================================================
 CREATE TABLE IF NOT EXISTS order_checkout (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id UUID NOT NULL,
-    idempotency_key UUID,
+    id VARCHAR(36) PRIMARY KEY,
+    customer_id VARCHAR(36) NOT NULL,
+    idempotency_key VARCHAR(36),
     request_hash VARCHAR(255) NOT NULL,
     total_amount BIGINT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_checkout_customer_idempotency UNIQUE (customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_checkout_customer_id ON order_checkout(customer_id);
-CREATE INDEX IF NOT EXISTS idx_checkout_idempotency ON order_checkout(idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_checkout_customer_idempotency ON order_checkout(customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 -- =====================================================
 -- Table: customer_order
@@ -63,11 +62,11 @@ CREATE INDEX IF NOT EXISTS idx_checkout_idempotency ON order_checkout(idempotenc
 -- Optimistic locking: version column incremented on each update
 -- =====================================================
 CREATE TABLE IF NOT EXISTS customer_order (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    checkout_id UUID REFERENCES order_checkout(id),
-    customer_id UUID NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    checkout_id VARCHAR(36) REFERENCES order_checkout(id),
+    customer_id VARCHAR(36) NOT NULL,
     customer_display_name VARCHAR(255),
-    store_id UUID NOT NULL,
+    store_id VARCHAR(36) NOT NULL,
     store_name VARCHAR(255) NOT NULL,
     status VARCHAR(20) NOT NULL,
     pickup_code VARCHAR(6),
@@ -109,9 +108,9 @@ WHERE status IN ('CONFIRMED', 'PREPARING', 'READY');
 -- Line total = unit_price * quantity (enforced by CHECK)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS order_line (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    order_id UUID NOT NULL REFERENCES customer_order(id),
-    article_id UUID NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    order_id VARCHAR(36) NOT NULL REFERENCES customer_order(id),
+    article_id VARCHAR(36) NOT NULL,
     label VARCHAR(255) NOT NULL,
     unit_price BIGINT NOT NULL,
     quantity INTEGER NOT NULL CHECK (quantity > 0),
@@ -130,11 +129,11 @@ CREATE INDEX IF NOT EXISTS idx_order_line_order_id ON order_line(order_id);
 -- Actor: either a customer/user UUID or SYSTEM (from automated processes)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS order_status_history (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    order_id UUID NOT NULL REFERENCES customer_order(id),
+    id VARCHAR(36) PRIMARY KEY,
+    order_id VARCHAR(36) NOT NULL REFERENCES customer_order(id),
     from_status VARCHAR(20),
     to_status VARCHAR(20) NOT NULL,
-    actor_id UUID,
+    actor_id VARCHAR(36),
     actor_role VARCHAR(50) NOT NULL,
     changed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Constraints
